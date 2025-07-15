@@ -1,3 +1,4 @@
+import os
 import socket
 import sys
 import itertools
@@ -23,6 +24,42 @@ def generate_passwords(length):
     characters = string.ascii_lowercase + string.digits  # 'abcdefghijklmnopqrstuvwxyz0123456789'
     for password_tuple in itertools.product(characters, repeat=length):
         yield ''.join(password_tuple)
+
+
+def generate_passwords_with_file():
+    """
+    (三) 标准密码词典破解密码
+    这里已经提供一个准备好的典型密码字典，它是使用具有超过 100 万个真实密码的数据库生成的。
+    将带有典型密码的文件放入您的工作目录中，您可以在 os 模块的帮助下找到该目录。
+
+    您不仅必须尝试字典的每个元素，还需要尝试密码字典中所有单词的每个字母的大小写的所有可能组合。
+    例如，对于一个 6 个字母的单词，您会得到 64 种可能的组合。
+    字典中有单词 'qwerty'，但狡猾的管理员将其设置为 'qWeRTy'。您的程序也应该可以破解此类密码。
+    推荐使用zip()函数将大小写字母配对，并使用 * 来解压缩列表以用作 itertools.product() 的参数
+
+    在此阶段，您应该编写一个程序，该程序：
+    1. 解析命令行并获取两个参数，即 IP 地址和端口。
+    2. 使用典型密码列表查找正确的密码。
+    3. 打印找到的密码。
+    4. 为避免 ConnectionResetError 和 ConnectionAbortedError,
+    您应该在从服务器收到 Connection success! 时关闭客户端套接字并结束程序
+
+    例子：
+    > python hack.py localhost 9090
+    qWeRTy
+    """
+    file_path = 'passwords.txt'  # 假设密码文件名为 passwords.txt
+    with open(file_path, 'r') as file:
+        for line in file:
+            word = line.strip()
+            # 生成所有可能的大小写组合
+            for password_tuple in itertools.product(*zip(word.lower(), word.upper())):
+                # eg. word='cat' 
+                # list(zip(word.lower(),word.upper())): [('c', 'C'), ('a', 'A'), ('t', 'T')]
+                # list(itertools.product(*zip(word.lower(),word.upper())))
+                # [('c', 'a', 't'), ('c', 'a', 'T'), ('c', 'A', 't'), ('c', 'A', 'T'), 
+                # ('C', 'a', 't'), ('C', 'a', 'T'), ('C', 'A', 't'), ('C', 'A', 'T')]
+                yield ''.join(password_tuple)
 
 
 def main():
@@ -62,9 +99,8 @@ def main():
         sock.settimeout(3.0)
         sock.connect((ip_address, port))
 
-        length = 1  # 初始密码长度
         while True:
-            g = generate_passwords(length)
+            g = generate_passwords_with_file()
 
             for password in g:
                 # print(password)
@@ -81,8 +117,6 @@ def main():
                 elif reply == "Too many attempts":
                     print("服务器拒绝继续尝试，退出")
                     return
-
-            length += 1
 
 
 if __name__ == "__main__":
